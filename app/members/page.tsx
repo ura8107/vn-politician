@@ -1,7 +1,22 @@
 import { createClient } from "@/lib/supabase/server";
+import { Input } from "@/components/ui/input";
 import Link from "next/link";
 
 export const dynamic = "force-dynamic";
+
+const SORT_OPTIONS = {
+  full_name: "full_name",
+  province_name: "province_name",
+  electoral_unit_number: "electoral_unit_number",
+} as const;
+
+const DIRECTION_OPTIONS = {
+  asc: true,
+  desc: false,
+} as const;
+
+type SortKey = keyof typeof SORT_OPTIONS;
+type SortDirection = keyof typeof DIRECTION_OPTIONS;
 
 type AssemblyMember = {
   id: string;
@@ -14,19 +29,99 @@ type AssemblyMember = {
   nationality: string | null;
 };
 
-async function getAssemblyMembers() {
-  const supabase = await createClient();
+type MembersSearchParams = {
+  q?: string;
+  sort?: string;
+  dir?: string;
+  province?: string;
+};
 
-  const { data, error, count } = await supabase
+type MembersQueryState = {
+  query: string;
+  sort: SortKey;
+  direction: SortDirection;
+  province: string;
+};
+
+function isSortKey(value: string): value is SortKey {
+  return value in SORT_OPTIONS;
+}
+
+function isSortDirection(value: string): value is SortDirection {
+  return value in DIRECTION_OPTIONS;
+}
+
+function normalizeMembersQueryState(
+  params: MembersSearchParams,
+): MembersQueryState {
+  const query = params.q?.trim() ?? "";
+  const province = params.province?.trim() ?? "";
+  const sort = params.sort && isSortKey(params.sort) ? params.sort : "full_name";
+  const direction =
+    params.dir && isSortDirection(params.dir) ? params.dir : "asc";
+
+  return {
+    query,
+    sort,
+    direction,
+    province,
+  };
+}
+
+function buildSearchPattern(query: string) {
+  return query.replaceAll(",", " ").replace(/\s+/g, " ").trim();
+}
+
+async function getAssemblyMembers(state: MembersQueryState) {
+  const supabase = await createClient();
+  const searchPattern = buildSearchPattern(state.query);
+
+  let query = supabase
     .from("assembly_members")
     .select(
       "id, full_name, full_name_ascii, occupation_position, province_name, electoral_unit_number, workplace, nationality",
       { count: "exact" },
     )
-    .order("full_name", { ascending: true })
+    .order(SORT_OPTIONS[state.sort], {
+      ascending: DIRECTION_OPTIONS[state.direction],
+      nullsFirst: false,
+    })
     .limit(100);
 
+  if (state.province) {
+    query = query.eq("province_name", state.province);
+  }
+
+  if (searchPattern) {
+    query = query.or(
+      [
+        `full_name.ilike.%${searchPattern}%`,
+        `full_name_ascii.ilike.%${searchPattern}%`,
+        `province_name.ilike.%${searchPattern}%`,
+        `occupation_position.ilike.%${searchPattern}%`,
+      ].join(","),
+    );
+  }
+
+  const { data, error, count } = await query;
+
   return { data: data as AssemblyMember[] | null, error, count };
+}
+
+async function getProvinceOptions() {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("assembly_members")
+    .select("province_name")
+    .not("province_name", "is", null)
+    .order("province_name", { ascending: true })
+    .limit(500);
+
+  if (error || !data) {
+    return [];
+  }
+
+  return [...new Set(data.map((row) => row.province_name).filter(Boolean))];
 }
 
 function EmptyState() {
@@ -58,8 +153,152 @@ function EmptyState() {
   );
 }
 
-export default async function MembersPage() {
-  const { data, error, count } = await getAssemblyMembers();
+function NoResultsState({ state }: { state: MembersQueryState }) {
+  const hasFilters = Boolean(state.query || state.province);
+
+  return (
+    <div className="rounded-3xl border border-dashed border-foreground/20 bg-background/70 p-8">
+      <h2 className="text-2xl font-semibold">No matching members found</h2>
+      <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
+        {hasFilters
+          ? "Try a different keyword, province, or sort order. The current filters returned zero records."
+          : "No results were returned for this view."}
+      </p>
+      <div className="mt-6 flex flex-wrap gap-3">
+        <Link
+          href="/members"
+          className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background"
+        >
+          Reset filters
+        </Link>
+        <Link
+          href="/members/json"
+          className="rounded-full border border-foreground/20 px-4 py-2 text-sm font-medium"
+        >
+          Open JSON view
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function Controls({
+  state,
+  provinces,
+}: {
+  state: MembersQueryState;
+  provinces: string[];
+}) {
+  return (
+    <form
+      method="GET"
+      className="grid gap-4 border-b border-black/5 px-6 py-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1.1fr)_220px_160px_auto]"
+    >
+      <div className="grid gap-2">
+        <label
+          htmlFor="q"
+          className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500"
+        >
+          Search
+        </label>
+        <Input
+          id="q"
+          name="q"
+          defaultValue={state.query}
+          placeholder="Name, ASCII name, province, or position"
+          className="h-11 rounded-2xl border-black/10 bg-white"
+        />
+      </div>
+
+      <div className="grid gap-2">
+        <label
+          htmlFor="province"
+          className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500"
+        >
+          Province
+        </label>
+        <select
+          id="province"
+          name="province"
+          defaultValue={state.province}
+          className="h-11 rounded-2xl border border-black/10 bg-white px-3 text-sm shadow-sm outline-none transition focus:border-emerald-700"
+        >
+          <option value="">All provinces</option>
+          {provinces.map((province) => (
+            <option key={province} value={province}>
+              {province}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="grid gap-2">
+        <label
+          htmlFor="sort"
+          className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500"
+        >
+          Sort by
+        </label>
+        <select
+          id="sort"
+          name="sort"
+          defaultValue={state.sort}
+          className="h-11 rounded-2xl border border-black/10 bg-white px-3 text-sm shadow-sm outline-none transition focus:border-emerald-700"
+        >
+          <option value="full_name">Name</option>
+          <option value="province_name">Province</option>
+          <option value="electoral_unit_number">Electoral unit</option>
+        </select>
+      </div>
+
+      <div className="grid gap-2">
+        <label
+          htmlFor="dir"
+          className="text-xs font-semibold uppercase tracking-[0.2em] text-stone-500"
+        >
+          Direction
+        </label>
+        <select
+          id="dir"
+          name="dir"
+          defaultValue={state.direction}
+          className="h-11 rounded-2xl border border-black/10 bg-white px-3 text-sm shadow-sm outline-none transition focus:border-emerald-700"
+        >
+          <option value="asc">Ascending</option>
+          <option value="desc">Descending</option>
+        </select>
+      </div>
+
+      <div className="flex items-end gap-3">
+        <button
+          type="submit"
+          className="inline-flex h-11 items-center justify-center rounded-full bg-emerald-900 px-5 text-sm font-medium text-emerald-50"
+        >
+          Apply
+        </button>
+        <Link
+          href="/members"
+          className="inline-flex h-11 items-center justify-center rounded-full border border-black/10 px-5 text-sm font-medium"
+        >
+          Reset
+        </Link>
+      </div>
+    </form>
+  );
+}
+
+export default async function MembersPage({
+  searchParams,
+}: {
+  searchParams: Promise<MembersSearchParams>;
+}) {
+  const state = normalizeMembersQueryState(await searchParams);
+  const [{ data, error, count }, provinces] = await Promise.all([
+    getAssemblyMembers(state),
+    getProvinceOptions(),
+  ]);
+  const isFiltered = Boolean(state.query || state.province);
+  const showingPartialResults = (count ?? 0) > 100;
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(205,252,239,0.8),_transparent_45%),linear-gradient(180deg,_#fbf8ef_0%,_#f5efe4_100%)] text-foreground">
@@ -73,10 +312,9 @@ export default async function MembersPage() {
               National Assembly member intake workspace
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">
-              This page is the first validation layer after importing the PDF
-              into Supabase. It reads the first 100 rows from{" "}
-              <code>assembly_members</code> so you can quickly spot broken
-              names, wrong provinces, and missing positions.
+              Search, sort, and filter the imported records in{" "}
+              <code>assembly_members</code>. This keeps the QA workflow in one
+              place while still using the live Supabase data.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link
@@ -100,7 +338,7 @@ export default async function MembersPage() {
             </p>
             <dl className="mt-5 grid gap-4">
               <div>
-                <dt className="text-sm text-emerald-200/70">Rows in table</dt>
+                <dt className="text-sm text-emerald-200/70">Matching rows</dt>
                 <dd className="mt-1 text-4xl font-semibold">{count ?? 0}</dd>
               </div>
               <div>
@@ -112,7 +350,9 @@ export default async function MembersPage() {
               <div>
                 <dt className="text-sm text-emerald-200/70">Next check</dt>
                 <dd className="mt-1 text-sm leading-6">
-                  Confirm 500 rows after the CSV import is complete.
+                  {showingPartialResults
+                    ? "The table shows the first 100 matching rows."
+                    : "All matching rows are visible in this view."}
                 </dd>
               </div>
             </dl>
@@ -123,48 +363,61 @@ export default async function MembersPage() {
           <pre className="overflow-x-auto rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
             {error.message}
           </pre>
-        ) : !data || data.length === 0 ? (
+        ) : count === 0 && !isFiltered ? (
           <EmptyState />
         ) : (
           <section className="overflow-hidden rounded-[2rem] border border-black/5 bg-white/85 shadow-sm backdrop-blur">
-            <div className="border-b border-black/5 px-6 py-4">
-              <h2 className="text-lg font-semibold">First 100 members</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                A compact QA view for the imported records.
-              </p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-left text-sm">
-                <thead className="bg-stone-100/80 text-stone-600">
-                  <tr>
-                    <th className="px-6 py-3 font-medium">Name</th>
-                    <th className="px-6 py-3 font-medium">ASCII</th>
-                    <th className="px-6 py-3 font-medium">Province</th>
-                    <th className="px-6 py-3 font-medium">Electoral unit</th>
-                    <th className="px-6 py-3 font-medium">Position</th>
-                    <th className="px-6 py-3 font-medium">Workplace</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {data.map((member) => (
-                    <tr key={member.id} className="border-t border-black/5">
-                      <td className="px-6 py-4 font-medium">{member.full_name}</td>
-                      <td className="px-6 py-4 text-muted-foreground">
-                        {member.full_name_ascii || "-"}
-                      </td>
-                      <td className="px-6 py-4">{member.province_name || "-"}</td>
-                      <td className="px-6 py-4">
-                        {member.electoral_unit_number || "-"}
-                      </td>
-                      <td className="px-6 py-4">{member.occupation_position || "-"}</td>
-                      <td className="px-6 py-4">
-                        {member.workplace || member.nationality || "-"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <Controls state={state} provinces={provinces} />
+            {!data || data.length === 0 ? (
+              <div className="p-6">
+                <NoResultsState state={state} />
+              </div>
+            ) : (
+              <>
+                <div className="border-b border-black/5 px-6 py-4">
+                  <h2 className="text-lg font-semibold">Members</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {showingPartialResults
+                      ? "Showing the first 100 records for the current search."
+                      : "Showing all records for the current search."}
+                  </p>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="min-w-full text-left text-sm">
+                    <thead className="bg-stone-100/80 text-stone-600">
+                      <tr>
+                        <th className="px-6 py-3 font-medium">Name</th>
+                        <th className="px-6 py-3 font-medium">ASCII</th>
+                        <th className="px-6 py-3 font-medium">Province</th>
+                        <th className="px-6 py-3 font-medium">Electoral unit</th>
+                        <th className="px-6 py-3 font-medium">Position</th>
+                        <th className="px-6 py-3 font-medium">Workplace</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {data.map((member) => (
+                        <tr key={member.id} className="border-t border-black/5">
+                          <td className="px-6 py-4 font-medium">{member.full_name}</td>
+                          <td className="px-6 py-4 text-muted-foreground">
+                            {member.full_name_ascii || "-"}
+                          </td>
+                          <td className="px-6 py-4">{member.province_name || "-"}</td>
+                          <td className="px-6 py-4">
+                            {member.electoral_unit_number || "-"}
+                          </td>
+                          <td className="px-6 py-4">
+                            {member.occupation_position || "-"}
+                          </td>
+                          <td className="px-6 py-4">
+                            {member.workplace || member.nationality || "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
           </section>
         )}
       </div>
