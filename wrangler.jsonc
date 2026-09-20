@@ -1,0 +1,50 @@
+/**
+ * Cloudflare Workers configuration for the OpenNext build of this Next.js app.
+ *
+ * Replace every <PLACEHOLDER> below with the ids printed by:
+ *   npx wrangler d1 create vn-politician
+ *   npx wrangler kv namespace create NEXT_INC_CACHE_KV
+ *
+ * Secrets (SESSION_SECRET) are never stored here. Use:
+ *   npx wrangler secret put SESSION_SECRET
+ */
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vn-politician",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+
+  "observability": {
+    "enabled": true
+  },
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "vn-politician",
+      "database_id": "<D1_DATABASE_ID>",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "NEXT_INC_CACHE_KV",
+      "id": "<KV_NAMESPACE_ID>"
+    }
+  ],
+
+  // Non-secret values only. Change NEXT_PUBLIC_SITE_URL to the real Workers /
+  // custom-domain URL after the first deploy. AUTH_SIGNUP_MODE is "open" or
+  // "closed"; "closed" rejects new sign-ups while keeping login working.
+  "vars": {
+    "NEXT_PUBLIC_SITE_URL": "http://localhost:3000",
+    "AUTH_SIGNUP_MODE": "open"
+  }
+}

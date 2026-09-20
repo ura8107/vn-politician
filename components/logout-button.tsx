@@ -1,17 +1,12 @@
-"use client";
-
-import { createClient } from "@/lib/supabase/client";
+import { signOutAction } from "@/lib/auth/actions";
 import { Button } from "@/components/ui/button";
-import { useRouter } from "next/navigation";
 
 export function LogoutButton() {
-  const router = useRouter();
-
-  const logout = async () => {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    router.push("/auth/login");
-  };
-
-  return <Button onClick={logout}>Logout</Button>;
+  // A plain form post: the session row is deleted from D1 inside the action,
+  // so signing out revokes the session server-side rather than only in cookies.
+  return (
+    <form action={signOutAction}>
+      <Button type="submit">Logout</Button>
+    </form>
+  );
 }

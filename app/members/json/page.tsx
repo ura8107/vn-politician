@@ -1,19 +1,16 @@
-import { createClient } from "@/lib/supabase/server";
+import { listAssemblyMemberRecords } from "@/lib/db/assembly-members";
 
 export const dynamic = "force-dynamic";
 
 export default async function MembersJsonPage() {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("assembly_members")
-    .select()
-    .order("full_name", { ascending: true })
-    .limit(100);
+  let records;
 
-  if (error) {
+  try {
+    records = await listAssemblyMemberRecords();
+  } catch (error) {
     return (
       <main className="min-h-screen bg-stone-950 p-6 text-stone-50">
-        <pre>{error.message}</pre>
+        <pre>{error instanceof Error ? error.message : "Unknown D1 error"}</pre>
       </main>
     );
   }
@@ -21,7 +18,7 @@ export default async function MembersJsonPage() {
   return (
     <main className="min-h-screen bg-stone-950 p-6 text-stone-50">
       <pre className="overflow-x-auto whitespace-pre-wrap break-words">
-        {JSON.stringify(data, null, 2)}
+        {JSON.stringify(records, null, 2)}
       </pre>
     </main>
   );

@@ -1,33 +1,18 @@
-import { createClient } from "@/lib/supabase/server";
-import { Input } from "@/components/ui/input";
 import Link from "next/link";
 
+import { Input } from "@/components/ui/input";
+import {
+  DEFAULT_PAGE_SIZE,
+  isSortDirection,
+  isSortKey,
+  listAssemblyMembers,
+  listProvinces,
+  type AssemblyMemberPage,
+  type SortDirection,
+  type SortKey,
+} from "@/lib/db/assembly-members";
+
 export const dynamic = "force-dynamic";
-
-const SORT_OPTIONS = {
-  full_name: "full_name",
-  province_name: "province_name",
-  electoral_unit_number: "electoral_unit_number",
-} as const;
-
-const DIRECTION_OPTIONS = {
-  asc: true,
-  desc: false,
-} as const;
-
-type SortKey = keyof typeof SORT_OPTIONS;
-type SortDirection = keyof typeof DIRECTION_OPTIONS;
-
-type AssemblyMember = {
-  id: string;
-  full_name: string;
-  full_name_ascii: string | null;
-  occupation_position: string | null;
-  province_name: string | null;
-  electoral_unit_number: number | null;
-  workplace: string | null;
-  nationality: string | null;
-};
 
 type MembersSearchParams = {
   q?: string;
@@ -42,14 +27,6 @@ type MembersQueryState = {
   direction: SortDirection;
   province: string;
 };
-
-function isSortKey(value: string): value is SortKey {
-  return value in SORT_OPTIONS;
-}
-
-function isSortDirection(value: string): value is SortDirection {
-  return value in DIRECTION_OPTIONS;
-}
 
 function normalizeMembersQueryState(
   params: MembersSearchParams,
@@ -68,70 +45,14 @@ function normalizeMembersQueryState(
   };
 }
 
-function buildSearchPattern(query: string) {
-  return query.replaceAll(",", " ").replace(/\s+/g, " ").trim();
-}
-
-async function getAssemblyMembers(state: MembersQueryState) {
-  const supabase = await createClient();
-  const searchPattern = buildSearchPattern(state.query);
-
-  let query = supabase
-    .from("assembly_members")
-    .select(
-      "id, full_name, full_name_ascii, occupation_position, province_name, electoral_unit_number, workplace, nationality",
-      { count: "exact" },
-    )
-    .order(SORT_OPTIONS[state.sort], {
-      ascending: DIRECTION_OPTIONS[state.direction],
-      nullsFirst: false,
-    })
-    .limit(100);
-
-  if (state.province) {
-    query = query.eq("province_name", state.province);
-  }
-
-  if (searchPattern) {
-    query = query.or(
-      [
-        `full_name.ilike.%${searchPattern}%`,
-        `full_name_ascii.ilike.%${searchPattern}%`,
-        `province_name.ilike.%${searchPattern}%`,
-        `occupation_position.ilike.%${searchPattern}%`,
-      ].join(","),
-    );
-  }
-
-  const { data, error, count } = await query;
-
-  return { data: data as AssemblyMember[] | null, error, count };
-}
-
-async function getProvinceOptions() {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("assembly_members")
-    .select("province_name")
-    .not("province_name", "is", null)
-    .order("province_name", { ascending: true })
-    .limit(500);
-
-  if (error || !data) {
-    return [];
-  }
-
-  return [...new Set(data.map((row) => row.province_name).filter(Boolean))];
-}
-
 function EmptyState() {
   return (
     <div className="rounded-3xl border border-dashed border-foreground/20 bg-background/70 p-8">
       <h2 className="text-2xl font-semibold">No members imported yet</h2>
       <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-        The database table is ready, but it looks empty. Follow the import guide
-        to create the table in Supabase and upload the CSV extracted from the
-        PDF.
+        The D1 table exists but holds no rows yet. Generate the seed file with
+        <code> npm run db:generate-seed </code> and apply it with
+        <code> npm run db:seed:local </code> (or <code>db:seed:remote</code>).
       </p>
       <div className="mt-6 flex flex-wrap gap-3">
         <Link
@@ -140,14 +61,6 @@ function EmptyState() {
         >
           Open JSON view
         </Link>
-        <a
-          href="https://app.supabase.com"
-          target="_blank"
-          rel="noreferrer"
-          className="rounded-full border border-foreground/20 px-4 py-2 text-sm font-medium"
-        >
-          Open Supabase Dashboard
-        </a>
       </div>
     </div>
   );
@@ -205,7 +118,7 @@ function Controls({
           id="q"
           name="q"
           defaultValue={state.query}
-          placeholder="Name, ASCII name, province, or position"
+          placeholder="Name, province, position (accents optional)"
           className="h-11 rounded-2xl border-black/10 bg-white"
         />
       </div>
@@ -293,12 +206,23 @@ export default async function MembersPage({
   searchParams: Promise<MembersSearchParams>;
 }) {
   const state = normalizeMembersQueryState(await searchParams);
-  const [{ data, error, count }, provinces] = await Promise.all([
-    getAssemblyMembers(state),
-    getProvinceOptions(),
-  ]);
+
+  let page: AssemblyMemberPage = { rows: [], total: 0 };
+  let provinces: string[] = [];
+  let error: string | null = null;
+
+  try {
+    [page, provinces] = await Promise.all([
+      listAssemblyMembers(state),
+      listProvinces(),
+    ]);
+  } catch (cause) {
+    error = cause instanceof Error ? cause.message : "Unknown D1 error";
+  }
+
+  const { rows: data, total: count } = page;
   const isFiltered = Boolean(state.query || state.province);
-  const showingPartialResults = (count ?? 0) > 100;
+  const showingPartialResults = count > DEFAULT_PAGE_SIZE;
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(205,252,239,0.8),_transparent_45%),linear-gradient(180deg,_#fbf8ef_0%,_#f5efe4_100%)] text-foreground">
@@ -313,8 +237,8 @@ export default async function MembersPage({
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">
               Search, sort, and filter the imported records in{" "}
-              <code>assembly_members</code>. This keeps the QA workflow in one
-              place while still using the live Supabase data.
+              <code>assembly_members</code>. Search is accent-insensitive, so
+              both <code>Hà Nội</code> and <code>ha noi</code> match.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link
@@ -339,19 +263,19 @@ export default async function MembersPage({
             <dl className="mt-5 grid gap-4">
               <div>
                 <dt className="text-sm text-emerald-200/70">Matching rows</dt>
-                <dd className="mt-1 text-4xl font-semibold">{count ?? 0}</dd>
+                <dd className="mt-1 text-4xl font-semibold">{count}</dd>
               </div>
               <div>
                 <dt className="text-sm text-emerald-200/70">Source</dt>
                 <dd className="mt-1 text-sm leading-6">
-                  Supabase `public.assembly_members`
+                  Cloudflare D1 `assembly_members`
                 </dd>
               </div>
               <div>
                 <dt className="text-sm text-emerald-200/70">Next check</dt>
                 <dd className="mt-1 text-sm leading-6">
                   {showingPartialResults
-                    ? "The table shows the first 100 matching rows."
+                    ? `The table shows the first ${DEFAULT_PAGE_SIZE} matching rows.`
                     : "All matching rows are visible in this view."}
                 </dd>
               </div>
@@ -361,7 +285,7 @@ export default async function MembersPage({
 
         {error ? (
           <pre className="overflow-x-auto rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-            {error.message}
+            {error}
           </pre>
         ) : count === 0 && !isFiltered ? (
           <EmptyState />
@@ -378,7 +302,7 @@ export default async function MembersPage({
                   <h2 className="text-lg font-semibold">Members</h2>
                   <p className="mt-1 text-sm text-muted-foreground">
                     {showingPartialResults
-                      ? "Showing the first 100 records for the current search."
+                      ? `Showing the first ${DEFAULT_PAGE_SIZE} records for the current search.`
                       : "Showing all records for the current search."}
                   </p>
                 </div>

@@ -1,0 +1,6 @@
+# Copy to .dev.vars for local development (`next dev`, `npm run preview`).
+# In production these are set with: npx wrangler secret put SESSION_SECRET
+#
+# Generate a value with:
+#   node -e "console.log(require('node:crypto').randomBytes(32).toString('base64url'))"
+SESSION_SECRET=replace-me-with-a-long-random-string
