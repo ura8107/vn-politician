@@ -2,14 +2,12 @@ import type { Metadata } from "next";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
-const defaultUrl = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : "http://localhost:3000";
+const defaultUrl = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
 export const metadata: Metadata = {
   metadataBase: new URL(defaultUrl),
   title: "VN Politician Intake",
-  description: "PDF to Supabase workflow for Vietnam National Assembly members",
+  description: "PDF to D1 workflow for Vietnam National Assembly members",
   robots: {
     index: false,
     follow: false,

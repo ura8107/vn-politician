@@ -1,14 +1,18 @@
 # VN Politician
 
-`VN Politician` is a `Next.js` app backed by `Supabase`. It is currently used as
-an intake and validation workspace for Vietnam National Assembly member data.
+`VN Politician` is a `Next.js` app backed by `Cloudflare D1`. It is currently
+used as an intake and validation workspace for Vietnam National Assembly member
+data.
 
-The app reads from `public.assembly_members` and provides:
+The app reads from the `assembly_members` table in D1 and provides:
 
 - a public homepage
-- a table view at `/members`
+- a table view at `/members` (search, sort, filter)
 - a JSON inspection view at `/members/json`
-- Supabase auth pages from the starter template
+- an empty `instruments` placeholder view at `/instruments`
+
+Everything runs on Cloudflare Workers, so there is no external database or auth
+provider that can go idle and pause.
 
 ## Local setup
 
@@ -18,11 +22,12 @@ Install dependencies:
 npm install
 ```
 
-Create `.env.local` from `.env.example` and set:
+Prepare the local D1 database:
 
-```env
-NEXT_PUBLIC_SUPABASE_URL=YOUR_SUPABASE_PROJECT_URL
-NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=YOUR_SUPABASE_PUBLISHABLE_KEY
+```bash
+npx wrangler login
+npx wrangler d1 execute vn-politician-db --file d1/schema.sql --local
+npx wrangler d1 execute vn-politician-db --file d1/seed.sql --local
 ```
 
 Then run:
@@ -33,32 +38,34 @@ npm run dev
 
 Open [http://localhost:3000](http://localhost:3000).
 
-## Supabase data setup
+## Data setup
 
 Project-specific setup docs:
 
 - [Assembly member import guide](docs/assembly-members-import.md)
-- [Vercel deployment guide](docs/deploy-vercel.md)
+- [Cloudflare deployment guide](docs/deploy-cloudflare.md)
 
-The table creation SQL lives in:
+The D1 schema and generated seed live in:
 
-- [supabase/001_create_assembly_members.sql](supabase/001_create_assembly_members.sql)
+- [d1/schema.sql](d1/schema.sql)
+- [d1/seed.sql](d1/seed.sql) (generated from `data/import/assembly_members.csv`
+  by `scripts/build_d1_seed.py`)
 
 ## Deploy
 
-This project is intended to deploy through `GitHub` + `Vercel`.
+This project deploys through `GitHub` + `Cloudflare Workers` using the
+`@opennextjs/cloudflare` adapter.
 
 Production deployment steps are documented here:
 
-- [docs/deploy-vercel.md](docs/deploy-vercel.md)
+- [docs/deploy-cloudflare.md](docs/deploy-cloudflare.md)
 
 Short version:
 
 1. Push `main` to GitHub
-2. Import the repo into Vercel
-3. Add the 2 Supabase environment variables
-4. Deploy
-5. Update Supabase `Site URL` and `Redirect URLs`
+2. `npx wrangler login`
+3. Create the D1 database and apply `d1/schema.sql` + `d1/seed.sql` with `--remote`
+4. Run `npm run deploy`
 
 ## Scripts
 
@@ -66,3 +73,7 @@ Short version:
 - `npm run build`
 - `npm run start`
 - `npm run lint`
+- `npm run preview` (build and preview in the Workers runtime via Wrangler)
+- `npm run deploy` (build and deploy to Cloudflare Workers)
+- `npm run upload` (build and upload a new version without deploying it)
+- `npm run cf-typegen` (regenerate `cloudflare-env.d.ts` from `wrangler.jsonc`)

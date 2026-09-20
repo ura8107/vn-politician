@@ -1,0 +1,4 @@
+# Copy this file to .dev.vars for local preview with `npm run preview`.
+# NEXT_PUBLIC_* values are baked in at build time from .env.local,
+# so this file only needs values read by the Worker at runtime.
+NEXTJS_ENV=development

@@ -1,17 +1,17 @@
-import { createClient } from "@/lib/supabase/server";
+import { getDB } from "@/lib/d1";
 import { Suspense } from "react";
 
+export const dynamic = "force-dynamic";
+
 async function InstrumentsData() {
-  const supabase = await createClient();
-  const { data: instruments, error } = await supabase
-    .from("instruments")
-    .select();
-
-  if (error) {
-    return <pre>{error.message}</pre>;
+  try {
+    const db = await getDB();
+    const { results } = await db.prepare("SELECT * FROM instruments").all();
+    return <pre>{JSON.stringify(results, null, 2)}</pre>;
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    return <pre>{message}</pre>;
   }
-
-  return <pre>{JSON.stringify(instruments, null, 2)}</pre>;
 }
 
 export default function InstrumentsPage() {

@@ -1,9 +1,5 @@
-import { AuthButton } from "@/components/auth-button";
-import { EnvVarWarning } from "@/components/env-var-warning";
 import { ThemeSwitcher } from "@/components/theme-switcher";
-import { hasEnvVars } from "@/lib/utils";
 import Link from "next/link";
-import { Suspense } from "react";
 
 const workflow = [
   {
@@ -14,12 +10,12 @@ const workflow = [
   {
     step: "2. Create the table",
     detail:
-      "Paste the SQL from supabase/001_create_assembly_members.sql into the Supabase SQL Editor and run it once.",
+      "Apply d1/schema.sql to Cloudflare D1 to create the assembly_members table.",
   },
   {
     step: "3. Import the CSV",
     detail:
-      "Upload data/import/assembly_members.csv into the assembly_members table using the Supabase dashboard.",
+      "Generate d1/seed.sql with scripts/build_d1_seed.py and load it into the assembly_members table.",
   },
   {
     step: "4. Verify the result",
@@ -45,13 +41,6 @@ export default function Home() {
             </Link>
           </div>
           <div className="flex items-center gap-4">
-            {!hasEnvVars ? (
-              <EnvVarWarning />
-            ) : (
-              <Suspense>
-                <AuthButton />
-              </Suspense>
-            )}
             <ThemeSwitcher />
           </div>
         </nav>
@@ -124,7 +113,10 @@ export default function Home() {
                   <code>data/import/assembly_members.csv</code>
                 </li>
                 <li>
-                  <code>supabase/001_create_assembly_members.sql</code>
+                  <code>d1/schema.sql</code>
+                </li>
+                <li>
+                  <code>d1/seed.sql</code>
                 </li>
                 <li>
                   <code>docs/assembly-members-import.md</code>

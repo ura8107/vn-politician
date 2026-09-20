@@ -1,6 +1,6 @@
 # Vietnam National Assembly Term 16 Import Guide
 
-This repository is now prepared for a PDF-to-Supabase workflow.
+This repository is prepared for a PDF-to-Cloudflare-D1 workflow.
 The source PDF you shared is:
 
 - `/Users/mtsr95/Downloads/Cong-Bo-Danh-Sach-Ch.pdf`
@@ -9,8 +9,8 @@ The workflow is:
 
 1. Extract the table from the PDF into CSV.
 2. Review the CSV for row breaks or missing values.
-3. Create the `assembly_members` table in Supabase.
-4. Import the CSV in the Supabase dashboard.
+3. Apply the D1 schema (creates `assembly_members`).
+4. Generate and load `d1/seed.sql` from the CSV.
 5. Confirm the imported records at `/members` and `/members/json`.
 
 ## 1. Extract the CSV from the PDF
@@ -43,50 +43,55 @@ Open the CSV and check:
 
 If a field is still messy, keep the raw text in the CSV and fix the row before import.
 
-## 3. Create the table in Supabase
+## 3. Apply the D1 schema
 
-Open Supabase Dashboard, then go to `SQL Editor`.
-Create a new query and paste the contents of [supabase/001_create_assembly_members.sql](/Users/mtsr95/vn-politician/supabase/001_create_assembly_members.sql:1).
-Run it once.
+The table definition lives in `d1/schema.sql`. Apply it with Wrangler:
+
+```bash
+# local (dev) database
+npx wrangler d1 execute vn-politician-db --file d1/schema.sql --local
+
+# remote (production) database
+npx wrangler d1 execute vn-politician-db --file d1/schema.sql --remote
+```
 
 What the SQL does:
 
-- Creates `public.assembly_members`.
-- Adds columns matching the PDF structure.
+- Creates the `assembly_members` table with columns matching the PDF structure.
 - Adds `source_data` JSON so no source field has to be thrown away.
-- Enables Row Level Security.
-- Adds a read policy for the app.
+- Creates indexes used by the search / sort / filter queries on `/members`.
+- Creates an empty `instruments` placeholder table.
 
-## 4. Import the CSV in Supabase
+## 4. Generate the seed SQL from the CSV
 
-In Supabase Dashboard:
+The repo keeps `d1/seed.sql` generated, but you can rebuild it any time:
 
-1. Open `Table Editor`.
-2. Select `assembly_members`.
-3. Click `Import data from CSV`.
-4. Upload `data/import/assembly_members.csv`.
-5. Confirm the column mapping.
-6. Start the import.
+```bash
+python3 scripts/build_d1_seed.py
+```
 
-Before you click import, check these carefully:
+This reads `data/import/assembly_members.csv` and writes exactly one SQL file
+of batched `INSERT` statements, assigning each row a generated UUID.
 
-- `birth_year`, `province_code`, `electoral_unit_number`, `source_page`, and `source_row_number` map to numeric columns.
-- `source_data` contains valid JSON strings.
-- `term_number` is `16`.
+## 5. Load the seed data into D1
 
-## 5. Verify in SQL Editor
+```bash
+# local
+npx wrangler d1 execute vn-politician-db --file d1/seed.sql --local
+
+# remote
+npx wrangler d1 execute vn-politician-db --file d1/seed.sql --remote
+```
+
+## 6. Verify the row count
 
 Run:
 
-```sql
-select count(*) from public.assembly_members;
+```bash
+npx wrangler d1 execute vn-politician-db --command "SELECT COUNT(*) FROM assembly_members;" --remote
 ```
 
-You should expect:
-
-```text
-500
-```
+You should expect `500`.
 
 Then inspect a small sample:
 
@@ -96,12 +101,12 @@ select
   province_name,
   electoral_unit_number,
   occupation_position
-from public.assembly_members
+from assembly_members
 order by province_code, electoral_unit_number, source_row_number
 limit 20;
 ```
 
-## 6. Verify in the app
+## 7. Verify in the app
 
 Start the app:
 
@@ -114,7 +119,13 @@ Then open:
 - `/members` for the readable QA table
 - `/members/json` for the raw JSON output
 
-## 7. Why the table keeps `source_data`
+To test in the Workers runtime instead:
+
+```bash
+npm run preview
+```
+
+## 8. Why the table keeps `source_data`
 
 The PDF has complex cells and long text blocks.
 To keep the first import safe for a beginner, the schema stores the main searchable fields in normal columns and reserves `source_data` for anything extra or uncertain.

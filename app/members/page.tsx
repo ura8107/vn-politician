@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { getDB } from "@/lib/d1";
 import { Input } from "@/components/ui/input";
 import Link from "next/link";
 
@@ -72,56 +72,77 @@ function buildSearchPattern(query: string) {
   return query.replaceAll(",", " ").replace(/\s+/g, " ").trim();
 }
 
-async function getAssemblyMembers(state: MembersQueryState) {
-  const supabase = await createClient();
-  const searchPattern = buildSearchPattern(state.query);
+const MEMBER_COLUMNS =
+  "id, full_name, full_name_ascii, occupation_position, province_name, electoral_unit_number, workplace, nationality";
 
-  let query = supabase
-    .from("assembly_members")
-    .select(
-      "id, full_name, full_name_ascii, occupation_position, province_name, electoral_unit_number, workplace, nationality",
-      { count: "exact" },
-    )
-    .order(SORT_OPTIONS[state.sort], {
-      ascending: DIRECTION_OPTIONS[state.direction],
-      nullsFirst: false,
-    })
-    .limit(100);
+function buildSearchClauses(state: MembersQueryState, searchPattern: string) {
+  const clauses: string[] = [];
+  const params: (string | number)[] = [];
 
   if (state.province) {
-    query = query.eq("province_name", state.province);
+    clauses.push("province_name = ?");
+    params.push(state.province);
   }
 
   if (searchPattern) {
-    query = query.or(
-      [
-        `full_name.ilike.%${searchPattern}%`,
-        `full_name_ascii.ilike.%${searchPattern}%`,
-        `province_name.ilike.%${searchPattern}%`,
-        `occupation_position.ilike.%${searchPattern}%`,
-      ].join(","),
+    const like = `%${searchPattern}%`;
+    clauses.push(
+      "(full_name LIKE ? OR full_name_ascii LIKE ? OR province_name LIKE ? OR occupation_position LIKE ?)",
     );
+    params.push(like, like, like, like);
   }
 
-  const { data, error, count } = await query;
+  const whereClause = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+  return { whereClause, params };
+}
 
-  return { data: data as AssemblyMember[] | null, error, count };
+async function getAssemblyMembers(state: MembersQueryState) {
+  try {
+    const db = await getDB();
+    const searchPattern = buildSearchPattern(state.query);
+    const { whereClause, params } = buildSearchClauses(state, searchPattern);
+    const sortColumn = SORT_OPTIONS[state.sort];
+    const direction = DIRECTION_OPTIONS[state.direction] ? "ASC" : "DESC";
+
+    const list = await db
+      .prepare(
+        `SELECT ${MEMBER_COLUMNS} FROM assembly_members${whereClause} ORDER BY ${sortColumn} ${direction} LIMIT 100`,
+      )
+      .bind(...params)
+      .all<AssemblyMember>();
+
+    const countRow = await db
+      .prepare(`SELECT COUNT(*) AS total FROM assembly_members${whereClause}`)
+      .bind(...params)
+      .first<{ total: number }>();
+
+    return {
+      data: list.results ?? [],
+      count: countRow?.total ?? 0,
+      error: null as string | null,
+    };
+  } catch (e) {
+    return {
+      data: [],
+      count: 0,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
 }
 
 async function getProvinceOptions() {
-  const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("assembly_members")
-    .select("province_name")
-    .not("province_name", "is", null)
-    .order("province_name", { ascending: true })
-    .limit(500);
+  try {
+    const db = await getDB();
+    const rows = await db
+      .prepare(
+        "SELECT DISTINCT province_name FROM assembly_members WHERE province_name IS NOT NULL AND province_name != '' ORDER BY province_name ASC LIMIT 500",
+      )
+      .all<{ province_name: string }>();
 
-  if (error || !data) {
+    return (rows.results ?? []).map((row) => row.province_name);
+  } catch {
     return [];
   }
-
-  return [...new Set(data.map((row) => row.province_name).filter(Boolean))];
 }
 
 function EmptyState() {
@@ -130,7 +151,7 @@ function EmptyState() {
       <h2 className="text-2xl font-semibold">No members imported yet</h2>
       <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
         The database table is ready, but it looks empty. Follow the import guide
-        to create the table in Supabase and upload the CSV extracted from the
+        to create the table in Cloudflare D1 and load the CSV extracted from the
         PDF.
       </p>
       <div className="mt-6 flex flex-wrap gap-3">
@@ -140,14 +161,12 @@ function EmptyState() {
         >
           Open JSON view
         </Link>
-        <a
-          href="https://app.supabase.com"
-          target="_blank"
-          rel="noreferrer"
+        <Link
+          href="/members/json"
           className="rounded-full border border-foreground/20 px-4 py-2 text-sm font-medium"
         >
-          Open Supabase Dashboard
-        </a>
+          Open JSON view
+        </Link>
       </div>
     </div>
   );
@@ -314,7 +333,7 @@ export default async function MembersPage({
             <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">
               Search, sort, and filter the imported records in{" "}
               <code>assembly_members</code>. This keeps the QA workflow in one
-              place while still using the live Supabase data.
+              place while still using the live Cloudflare D1 data.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link
@@ -344,7 +363,7 @@ export default async function MembersPage({
               <div>
                 <dt className="text-sm text-emerald-200/70">Source</dt>
                 <dd className="mt-1 text-sm leading-6">
-                  Supabase `public.assembly_members`
+                  D1 `assembly_members`
                 </dd>
               </div>
               <div>
@@ -361,7 +380,7 @@ export default async function MembersPage({
 
         {error ? (
           <pre className="overflow-x-auto rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
-            {error.message}
+            {error}
           </pre>
         ) : count === 0 && !isFiltered ? (
           <EmptyState />
