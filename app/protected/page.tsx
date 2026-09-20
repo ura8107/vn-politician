@@ -1,22 +1,20 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
-
-import { createClient } from "@/lib/supabase/server";
 import { InfoIcon } from "lucide-react";
-import { FetchDataSteps } from "@/components/tutorial/fetch-data-steps";
-import { Suspense } from "react";
 
-async function UserDetails() {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
+import { getCurrentUser } from "@/lib/auth/session";
 
-  if (error || !data?.claims) {
+export const dynamic = "force-dynamic";
+
+export default async function ProtectedPage() {
+  // proxy.ts already rejected unsigned cookies; this is the authoritative
+  // check against the app_sessions table in D1.
+  const user = await getCurrentUser();
+
+  if (!user) {
     redirect("/auth/login");
   }
 
-  return JSON.stringify(data.claims, null, 2);
-}
-
-export default function ProtectedPage() {
   return (
     <div className="flex-1 w-full flex flex-col gap-12">
       <div className="w-full">
@@ -27,16 +25,27 @@ export default function ProtectedPage() {
         </div>
       </div>
       <div className="flex flex-col gap-2 items-start">
-        <h2 className="font-bold text-2xl mb-4">Your user details</h2>
+        <h2 className="font-bold text-2xl mb-4">Your account</h2>
         <pre className="text-xs font-mono p-3 rounded border max-h-32 overflow-auto">
-          <Suspense>
-            <UserDetails />
-          </Suspense>
+          {JSON.stringify(user, null, 2)}
         </pre>
+        <Link
+          href="/auth/update-password"
+          className="mt-4 text-sm underline underline-offset-4"
+        >
+          Change your password
+        </Link>
       </div>
-      <div>
-        <h2 className="font-bold text-2xl mb-4">Next steps</h2>
-        <FetchDataSteps />
+      <div className="flex flex-col gap-2 items-start">
+        <h2 className="font-bold text-2xl mb-4">Where the data lives</h2>
+        <p className="text-sm leading-6 text-muted-foreground max-w-2xl">
+          Member records are stored in the Cloudflare D1 database bound to this
+          Worker as <code>DB</code>. Sessions and accounts live in the same
+          database, in <code>app_sessions</code> and <code>app_users</code>.
+        </p>
+        <Link href="/members" className="text-sm underline underline-offset-4">
+          Open the members QA view
+        </Link>
       </div>
     </div>
   );

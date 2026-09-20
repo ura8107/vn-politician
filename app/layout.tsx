@@ -2,14 +2,15 @@ import type { Metadata } from "next";
 import { ThemeProvider } from "next-themes";
 import "./globals.css";
 
-const defaultUrl = process.env.VERCEL_URL
-  ? `https://${process.env.VERCEL_URL}`
-  : "http://localhost:3000";
+// Was process.env.VERCEL_URL. On Workers the canonical URL comes from the
+// NEXT_PUBLIC_SITE_URL var (wrangler.jsonc / .env), not from the platform.
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
 export const metadata: Metadata = {
-  metadataBase: new URL(defaultUrl),
+  metadataBase: new URL(siteUrl),
   title: "VN Politician Intake",
-  description: "PDF to Supabase workflow for Vietnam National Assembly members",
+  description:
+    "Cloudflare D1 workspace for Vietnam National Assembly member data",
   robots: {
     index: false,
     follow: false,

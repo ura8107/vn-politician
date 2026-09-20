@@ -1,7 +1,5 @@
 import { AuthButton } from "@/components/auth-button";
-import { EnvVarWarning } from "@/components/env-var-warning";
 import { ThemeSwitcher } from "@/components/theme-switcher";
-import { hasEnvVars } from "@/lib/utils";
 import Link from "next/link";
 import { Suspense } from "react";
 
@@ -12,14 +10,14 @@ const workflow = [
       "Run the extraction script to convert the National Assembly PDF into a CSV file with 500 rows.",
   },
   {
-    step: "2. Create the table",
+    step: "2. Create the tables",
     detail:
-      "Paste the SQL from supabase/001_create_assembly_members.sql into the Supabase SQL Editor and run it once.",
+      "Apply the D1 migrations with npm run db:migrate:local (or db:migrate:remote for production).",
   },
   {
     step: "3. Import the CSV",
     detail:
-      "Upload data/import/assembly_members.csv into the assembly_members table using the Supabase dashboard.",
+      "Run npm run db:generate-seed to turn the CSV into SQL, then npm run db:seed:local to load it into D1.",
   },
   {
     step: "4. Verify the result",
@@ -45,13 +43,9 @@ export default function Home() {
             </Link>
           </div>
           <div className="flex items-center gap-4">
-            {!hasEnvVars ? (
-              <EnvVarWarning />
-            ) : (
-              <Suspense>
-                <AuthButton />
-              </Suspense>
-            )}
+            <Suspense>
+              <AuthButton />
+            </Suspense>
             <ThemeSwitcher />
           </div>
         </nav>
@@ -65,9 +59,9 @@ export default function Home() {
               Vietnam National Assembly Term 16 database workspace
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">
-              The app now includes a schema, a PDF extraction script, a CSV
-              template, and verification pages for the 500 elected members
-              listed in the official PDF.
+              The app runs entirely on Cloudflare: a D1 schema, a PDF
+              extraction script, a CSV-to-SQL seed generator, and verification
+              pages for the 500 elected members listed in the official PDF.
             </p>
 
             <div className="mt-8 flex flex-wrap gap-3">
@@ -103,15 +97,14 @@ export default function Home() {
           <aside className="flex flex-col gap-6">
             <div className="rounded-[2rem] border border-black/5 bg-emerald-950 p-8 text-emerald-50 shadow-sm">
               <p className="text-sm uppercase tracking-[0.3em] text-emerald-200/80">
-                Source PDF
+                Cloudflare stack
               </p>
-              <p className="mt-4 text-sm leading-6 text-emerald-100/90">
-                <code>/Users/mtsr95/Downloads/Cong-Bo-Danh-Sach-Ch.pdf</code>
-              </p>
-              <p className="mt-4 text-sm leading-6 text-emerald-100/90">
-                The extraction script has already generated a 500-row CSV from
-                this file.
-              </p>
+              <ul className="mt-4 space-y-2 text-sm leading-6 text-emerald-100/90">
+                <li>Workers (Next.js via OpenNext) for the app</li>
+                <li>D1 for member records, accounts, and sessions</li>
+                <li>Workers KV for the Next.js incremental cache</li>
+                <li>Workers Static Assets for everything prebuilt</li>
+              </ul>
             </div>
 
             <div className="rounded-[2rem] border border-black/5 bg-white/85 p-8 shadow-sm">
@@ -124,10 +117,16 @@ export default function Home() {
                   <code>data/import/assembly_members.csv</code>
                 </li>
                 <li>
-                  <code>supabase/001_create_assembly_members.sql</code>
+                  <code>migrations/0001_assembly_members.sql</code>
+                </li>
+                <li>
+                  <code>scripts/csv-to-d1-seed.mjs</code>
                 </li>
                 <li>
                   <code>docs/assembly-members-import.md</code>
+                </li>
+                <li>
+                  <code>docs/deploy-cloudflare.md</code>
                 </li>
               </ul>
             </div>
