@@ -51,6 +51,11 @@ The D1 schema and generated seed live in:
 - [d1/seed.sql](d1/seed.sql) (generated from `data/import/assembly_members.csv`
   by `scripts/build_d1_seed.py`)
 
+Data is extracted from the archived official list of the 500 deputies elected
+to the 16th National Assembly (`data/archive/Cong-Bo-Danh-Sach-Ch.pdf`, see
+[data/archive/README.md](data/archive/README.md)) using
+[scripts/extract_assembly_members.py](scripts/extract_assembly_members.py).
+
 ## Deploy
 
 This project deploys through `GitHub` + `Cloudflare Workers` using the

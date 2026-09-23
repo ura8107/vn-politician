@@ -108,11 +108,17 @@ def parse_page_context(
     electoral_unit_number: int | None = None
     electoral_unit_description: str | None = None
 
-    province_pattern = re.compile(r"^\s*(\d+)\s+[–-]\s+(.+?)\s*$")
+    combined_pattern = re.compile(
+        r"^\s*(\d+)\s*[–-]\s+((?:THÀNH PHỐ|TỈNH)\b.+?)\s*$"
+    )
+    name_only_pattern = re.compile(
+        r"^\s*[–-]\s+((?:THÀNH PHỐ|TỈNH)\b.+?)\s*$"
+    )
+    number_only_pattern = re.compile(r"^\s*(\d+)\s*$")
     electoral_pattern = re.compile(r"^\s*Đơn vị bầu cử số\s+(\d+):\s*(.+?)\s*$")
 
     for page_number, page in enumerate(pages, 1):
-        heading_lines: list[tuple[float, str]] = []
+        heading_lines: list[tuple[float, float, str]] = []
         for line in page.findall(".//x:line", NS):
             words = read_words(line)
             if not words:
@@ -120,18 +126,46 @@ def parse_page_context(
             y_min = min(word.y_min for word in words)
             if y_min > 220:
                 continue
+            x_center = sum(word.x_center for word in words) / len(words)
             text = normalize_space(" ".join(word.text for word in words))
             if text:
-                heading_lines.append((y_min, text))
+                heading_lines.append((y_min, x_center, text))
 
-        heading_lines.sort(key=lambda item: item[0])
+        # Some province headers render as two separate lines, e.g.
+        # line A: "10"   line B: "– TỈNH CAO BẰNG"
+        # Rejoin each name-only header with the number printed just before it.
+        normalized: list[tuple[float, float, str]] = []
+        used: set[int] = set()
+        for index, (y_min, x_center, text) in enumerate(heading_lines):
+            name_match = name_only_pattern.match(text)
+            if name_match:
+                province_number: int | None = None
+                for j, (other_y, other_x, other_text) in enumerate(heading_lines):
+                    if j == index or j in used:
+                        continue
+                    number_match = number_only_pattern.fullmatch(other_text)
+                    if (
+                        number_match
+                        and abs(other_y - y_min) < 10
+                        and other_x < x_center
+                    ):
+                        province_number = int(number_match.group(1))
+                        used.add(j)
+                        break
+                if province_number is not None:
+                    normalized.append(
+                        (y_min, x_center, f"{province_number} – {name_match.group(1)}")
+                    )
+                    used.add(index)
+                    continue
+            normalized.append((y_min, x_center, text))
+
+        normalized.sort(key=lambda item: item[0])
         collecting_electoral = False
 
-        for _, line in heading_lines:
-            province_match = province_pattern.match(line)
-            if province_match and province_match.group(2).startswith(
-                ("THÀNH PHỐ", "TỈNH")
-            ):
+        for _, _, line in normalized:
+            province_match = combined_pattern.match(line)
+            if province_match:
                 province_code = int(province_match.group(1))
                 province_name = province_match.group(2)
                 collecting_electoral = False
@@ -147,7 +181,7 @@ def parse_page_context(
             if collecting_electoral and not (
                 line.startswith("TT Họ và tên")
                 or line.startswith("Trình độ")
-                or province_pattern.match(line)
+                or combined_pattern.match(line)
             ):
                 electoral_unit_description = normalize_space(
                     f"{electoral_unit_description} {line}"

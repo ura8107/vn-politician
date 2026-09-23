@@ -1,9 +1,11 @@
 # Vietnam National Assembly Term 16 Import Guide
 
 This repository is prepared for a PDF-to-Cloudflare-D1 workflow.
-The source PDF you shared is:
+The source PDF is archived in this repository:
 
-- `/Users/mtsr95/Downloads/Cong-Bo-Danh-Sach-Ch.pdf`
+- `/Users/yukimatsuura/Downloads/Cong-Bo-Danh-Sach-Ch.pdf` (original source)
+- `data/archive/Cong-Bo-Danh-Sach-Ch.pdf` (fish-archived official copy,
+  see `data/archive/README.md` for provenance)
 
 The workflow is:
 
@@ -15,11 +17,12 @@ The workflow is:
 
 ## 1. Extract the CSV from the PDF
 
-Run this command inside the project:
+Run this command inside the project (the archived official PDF is included in
+`data/archive/`):
 
 ```bash
 python3 scripts/extract_assembly_members.py \
-  --input /Users/mtsr95/Downloads/Cong-Bo-Danh-Sach-Ch.pdf \
+  --input data/archive/Cong-Bo-Danh-Sach-Ch.pdf \
   --output data/import/assembly_members.csv
 ```
 
