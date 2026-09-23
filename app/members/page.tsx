@@ -4,6 +4,8 @@ import Link from "next/link";
 
 export const dynamic = "force-dynamic";
 
+const PAGE_SIZE = 50;
+
 const SORT_OPTIONS = {
   full_name: "full_name",
   province_name: "province_name",
@@ -34,6 +36,7 @@ type MembersSearchParams = {
   sort?: string;
   dir?: string;
   province?: string;
+  page?: string;
 };
 
 type MembersQueryState = {
@@ -41,6 +44,7 @@ type MembersQueryState = {
   sort: SortKey;
   direction: SortDirection;
   province: string;
+  page: number;
 };
 
 function isSortKey(value: string): value is SortKey {
@@ -59,12 +63,14 @@ function normalizeMembersQueryState(
   const sort = params.sort && isSortKey(params.sort) ? params.sort : "full_name";
   const direction =
     params.dir && isSortDirection(params.dir) ? params.dir : "asc";
+  const page = Math.max(1, Number.parseInt(params.page ?? "1", 10) || 1);
 
   return {
     query,
     sort,
     direction,
     province,
+    page,
   };
 }
 
@@ -103,12 +109,13 @@ async function getAssemblyMembers(state: MembersQueryState) {
     const { whereClause, params } = buildSearchClauses(state, searchPattern);
     const sortColumn = SORT_OPTIONS[state.sort];
     const direction = DIRECTION_OPTIONS[state.direction] ? "ASC" : "DESC";
+    const offset = (state.page - 1) * PAGE_SIZE;
 
     const list = await db
       .prepare(
-        `SELECT ${MEMBER_COLUMNS} FROM assembly_members${whereClause} ORDER BY ${sortColumn} ${direction} LIMIT 100`,
+        `SELECT ${MEMBER_COLUMNS} FROM assembly_members${whereClause} ORDER BY ${sortColumn} ${direction} LIMIT ? OFFSET ?`,
       )
-      .bind(...params)
+      .bind(...params, PAGE_SIZE, offset)
       .all<AssemblyMember>();
 
     const countRow = await db
@@ -118,13 +125,13 @@ async function getAssemblyMembers(state: MembersQueryState) {
 
     return {
       data: list.results ?? [],
-      count: countRow?.total ?? 0,
+      total: countRow?.total ?? 0,
       error: null as string | null,
     };
   } catch (e) {
     return {
       data: [],
-      count: 0,
+      total: 0,
       error: e instanceof Error ? e.message : String(e),
     };
   }
@@ -135,7 +142,7 @@ async function getProvinceOptions() {
     const db = await getDB();
     const rows = await db
       .prepare(
-        "SELECT DISTINCT province_name FROM assembly_members WHERE province_name IS NOT NULL AND province_name != '' ORDER BY province_name ASC LIMIT 500",
+        "SELECT DISTINCT province_name FROM assembly_members WHERE province_name IS NOT NULL AND province_name != '' ORDER BY province_name ASC",
       )
       .all<{ province_name: string }>();
 
@@ -145,21 +152,32 @@ async function getProvinceOptions() {
   }
 }
 
+function buildPageHref(state: MembersQueryState, page: number) {
+  const params = new URLSearchParams();
+  if (state.query) params.set("q", state.query);
+  if (state.province) params.set("province", state.province);
+  if (state.sort !== "full_name") params.set("sort", state.sort);
+  if (state.direction !== "asc") params.set("dir", state.direction);
+  if (page > 1) params.set("page", String(page));
+  const query = params.toString();
+  return query ? `/members?${query}` : "/members";
+}
+
 function EmptyState() {
   return (
     <div className="rounded-3xl border border-dashed border-foreground/20 bg-background/70 p-8">
-      <h2 className="text-2xl font-semibold">No members imported yet</h2>
+      <h2 className="text-2xl font-semibold">No members found</h2>
       <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
-        The database table is ready, but it looks empty. Follow the import guide
-        to create the table in Cloudflare D1 and load the CSV extracted from the
-        PDF.
+        The database is empty. Follow the import guide to create the table in
+        Cloudflare D1 and load the 500 deputies from the archived official
+        list.
       </p>
       <div className="mt-6 flex flex-wrap gap-3">
         <Link
-          href="/members/json"
+          href="/members"
           className="rounded-full bg-foreground px-4 py-2 text-sm font-medium text-background"
         >
-          Open JSON view
+          Reset filters
         </Link>
         <Link
           href="/members/json"
@@ -180,7 +198,7 @@ function NoResultsState({ state }: { state: MembersQueryState }) {
       <h2 className="text-2xl font-semibold">No matching members found</h2>
       <p className="mt-3 max-w-2xl text-sm leading-6 text-muted-foreground">
         {hasFilters
-          ? "Try a different keyword, province, or sort order. The current filters returned zero records."
+          ? "Try a different keyword or province. The current filters returned zero records."
           : "No results were returned for this view."}
       </p>
       <div className="mt-6 flex flex-wrap gap-3">
@@ -224,7 +242,7 @@ function Controls({
           id="q"
           name="q"
           defaultValue={state.query}
-          placeholder="Name, ASCII name, province, or position"
+          placeholder="Name, province, or position"
           className="h-11 rounded-2xl border-black/10 bg-white"
         />
       </div>
@@ -306,18 +324,59 @@ function Controls({
   );
 }
 
+function Pagination({
+  state,
+  total,
+}: {
+  state: MembersQueryState;
+  total: number;
+}) {
+  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const currentPage = Math.min(state.page, totalPages);
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-4 border-t border-black/5 px-6 py-4 text-sm">
+      <p className="text-muted-foreground">
+        {total.toLocaleString()} result{total === 1 ? "" : "s"} · page{" "}
+        {currentPage} of {totalPages}
+      </p>
+      <div className="flex items-center gap-3">
+        {currentPage > 1 ? (
+          <Link
+            href={buildPageHref(state, currentPage - 1)}
+            className="rounded-full border border-black/10 bg-white px-4 py-2 font-medium"
+          >
+            ← Previous
+          </Link>
+        ) : (
+          <span className="px-4 py-2 text-muted-foreground">← Previous</span>
+        )}
+        {currentPage < totalPages ? (
+          <Link
+            href={buildPageHref(state, currentPage + 1)}
+            className="rounded-full border border-black/10 bg-white px-4 py-2 font-medium"
+          >
+            Next →
+          </Link>
+        ) : (
+          <span className="px-4 py-2 text-muted-foreground">Next →</span>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default async function MembersPage({
   searchParams,
 }: {
   searchParams: Promise<MembersSearchParams>;
 }) {
   const state = normalizeMembersQueryState(await searchParams);
-  const [{ data, error, count }, provinces] = await Promise.all([
+  const [{ data, error, total }, provinces] = await Promise.all([
     getAssemblyMembers(state),
     getProvinceOptions(),
   ]);
   const isFiltered = Boolean(state.query || state.province);
-  const showingPartialResults = (count ?? 0) > 100;
 
   return (
     <main className="min-h-screen bg-[radial-gradient(circle_at_top,_rgba(205,252,239,0.8),_transparent_45%),linear-gradient(180deg,_#fbf8ef_0%,_#f5efe4_100%)] text-foreground">
@@ -325,22 +384,22 @@ export default async function MembersPage({
         <header className="grid gap-5 lg:grid-cols-[1.4fr_0.8fr]">
           <div className="rounded-[2rem] border border-black/5 bg-white/85 p-8 shadow-sm backdrop-blur">
             <p className="text-sm uppercase tracking-[0.3em] text-emerald-800/70">
-              Vietnam Data Intake
+              Term 16 · 2026–2031
             </p>
             <h1 className="mt-4 text-4xl font-semibold leading-tight">
-              National Assembly member intake workspace
+              National Assembly members
             </h1>
             <p className="mt-4 max-w-2xl text-sm leading-6 text-muted-foreground">
-              Search, sort, and filter the imported records in{" "}
-              <code>assembly_members</code>. This keeps the QA workflow in one
-              place while still using the live Cloudflare D1 data.
+              Search, sort, and filter all 500 deputies elected to the 16th
+              National Assembly of Vietnam. Select a name to open the full
+              profile.
             </p>
             <div className="mt-6 flex flex-wrap gap-3">
               <Link
                 href="/members/json"
                 className="rounded-full bg-emerald-900 px-4 py-2 text-sm font-medium text-emerald-50"
               >
-                Raw JSON
+                Raw data (JSON)
               </Link>
               <Link
                 href="/"
@@ -353,25 +412,23 @@ export default async function MembersPage({
 
           <div className="rounded-[2rem] border border-black/5 bg-emerald-950 p-8 text-emerald-50 shadow-sm">
             <p className="text-sm uppercase tracking-[0.3em] text-emerald-200/80">
-              Status
+              Members
             </p>
             <dl className="mt-5 grid gap-4">
               <div>
-                <dt className="text-sm text-emerald-200/70">Matching rows</dt>
-                <dd className="mt-1 text-4xl font-semibold">{count ?? 0}</dd>
+                <dt className="text-sm text-emerald-200/70">Matching results</dt>
+                <dd className="mt-1 text-4xl font-semibold">{total ?? 0}</dd>
+              </div>
+              <div>
+                <dt className="text-sm text-emerald-200/70">Provinces</dt>
+                <dd className="mt-1 text-sm leading-6">
+                  {provinces.length} provinces & cities
+                </dd>
               </div>
               <div>
                 <dt className="text-sm text-emerald-200/70">Source</dt>
                 <dd className="mt-1 text-sm leading-6">
-                  D1 `assembly_members`
-                </dd>
-              </div>
-              <div>
-                <dt className="text-sm text-emerald-200/70">Next check</dt>
-                <dd className="mt-1 text-sm leading-6">
-                  {showingPartialResults
-                    ? "The table shows the first 100 matching rows."
-                    : "All matching rows are visible in this view."}
+                  Official list · 232/NQ-HĐBCQG
                 </dd>
               </div>
             </dl>
@@ -382,7 +439,7 @@ export default async function MembersPage({
           <pre className="overflow-x-auto rounded-3xl border border-red-200 bg-red-50 p-6 text-sm text-red-700">
             {error}
           </pre>
-        ) : count === 0 && !isFiltered ? (
+        ) : total === 0 && !isFiltered ? (
           <EmptyState />
         ) : (
           <section className="overflow-hidden rounded-[2rem] border border-black/5 bg-white/85 shadow-sm backdrop-blur">
@@ -393,20 +450,26 @@ export default async function MembersPage({
               </div>
             ) : (
               <>
-                <div className="border-b border-black/5 px-6 py-4">
-                  <h2 className="text-lg font-semibold">Members</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    {showingPartialResults
-                      ? "Showing the first 100 records for the current search."
-                      : "Showing all records for the current search."}
-                  </p>
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-black/5 px-6 py-4">
+                  <div>
+                    <h2 className="text-lg font-semibold">Deputies</h2>
+                    <p className="mt-1 text-sm text-muted-foreground">
+                      Showing {data.length} of {total} matching result
+                      {total === 1 ? "" : "s"}.
+                    </p>
+                  </div>
+                  <Link
+                    href={buildPageHref(state, 1)}
+                    className="rounded-full border border-black/10 bg-white px-4 py-2 text-sm font-medium"
+                  >
+                    Jump to page 1
+                  </Link>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="min-w-full text-left text-sm">
                     <thead className="bg-stone-100/80 text-stone-600">
                       <tr>
                         <th className="px-6 py-3 font-medium">Name</th>
-                        <th className="px-6 py-3 font-medium">ASCII</th>
                         <th className="px-6 py-3 font-medium">Province</th>
                         <th className="px-6 py-3 font-medium">Electoral unit</th>
                         <th className="px-6 py-3 font-medium">Position</th>
@@ -416,11 +479,22 @@ export default async function MembersPage({
                     <tbody>
                       {data.map((member) => (
                         <tr key={member.id} className="border-t border-black/5">
-                          <td className="px-6 py-4 font-medium">{member.full_name}</td>
-                          <td className="px-6 py-4 text-muted-foreground">
-                            {member.full_name_ascii || "-"}
+                          <td className="px-6 py-4">
+                            <Link
+                              href={`/members/${member.id}`}
+                              className="font-medium text-emerald-950 hover:underline"
+                            >
+                              {member.full_name}
+                            </Link>
+                            {member.full_name_ascii ? (
+                              <span className="block text-xs text-muted-foreground">
+                                {member.full_name_ascii}
+                              </span>
+                            ) : null}
                           </td>
-                          <td className="px-6 py-4">{member.province_name || "-"}</td>
+                          <td className="px-6 py-4">
+                            {member.province_name || "-"}
+                          </td>
                           <td className="px-6 py-4">
                             {member.electoral_unit_number || "-"}
                           </td>
@@ -435,6 +509,7 @@ export default async function MembersPage({
                     </tbody>
                   </table>
                 </div>
+                <Pagination state={state} total={total} />
               </>
             )}
           </section>

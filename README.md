@@ -6,10 +6,10 @@ data.
 
 The app reads from the `assembly_members` table in D1 and provides:
 
-- a public homepage
-- a table view at `/members` (search, sort, filter)
-- a JSON inspection view at `/members/json`
-- an empty `instruments` placeholder view at `/instruments`
+- a public homepage with search entry point
+- a searchable, paginated table view at `/members`
+- a full profile page for each deputy at `/members/[id]`
+- a raw JSON inspection view at `/members/json`
 
 Everything runs on Cloudflare Workers, so there is no external database or auth
 provider that can go idle and pause.
